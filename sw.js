@@ -1,6 +1,6 @@
 /* 气象观测台 PWA Service Worker
    壳资源：cache-first；天气 API：stale-while-revalidate（离线可看上次数据） */
-var SHELL = 'wx-shell-v1';
+var SHELL = 'wx-shell-v2';
 var API = 'wx-api-v1';
 var SHELL_FILES = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
