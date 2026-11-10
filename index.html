@@ -166,6 +166,30 @@ main{padding:calc(var(--bar) + var(--safe-t) + 12px) 12px calc(28px + var(--safe
 footer{padding:4px 6px 0;font-family:var(--mono);font-size:9.5px;color:var(--ink-soft);line-height:1.9}
 footer a{color:var(--ink-2)}
 
+/* ---------- 今日穿搭 ---------- */
+.outfit{padding:12px 14px}
+.outfit .sum{font-family:var(--serif);font-size:14px;line-height:1.75;color:var(--ink-2);margin:0 0 10px}
+.outfit .row{display:flex;gap:10px;padding:8px 0;border-top:1px dotted var(--rule)}
+.outfit .row .k{flex:none;width:56px;font-size:10.5px;letter-spacing:.14em;color:var(--ink-soft);padding-top:3px}
+.outfit .row .v{flex:1;font-size:13px;line-height:1.65;color:var(--ink)}
+
+/* ---------- 城市对比 ---------- */
+.cmpwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;padding:10px 12px 14px}
+.cmpgrid{display:flex;gap:8px;min-width:min-content}
+.cmpcol{flex:none;width:106px;background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:10px 8px 9px;text-align:center;position:relative}
+.cmpcol .cn{font-size:12px;font-weight:600;margin:0 14px 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmpcol .cx{position:absolute;top:3px;right:4px;border:0;background:none;color:var(--ink-soft);font-size:15px;line-height:1;cursor:pointer;padding:3px 5px}
+.cmpcol .ci{color:var(--sky);margin:2px 0}
+.cmpcol .ct{font-family:var(--mono);font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.cmpcol .cd{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:2px}
+.cmpcol .cr{font-family:var(--mono);font-size:10px;margin-top:5px;color:var(--ink-soft)}
+.cmpcol .cr.warmer{color:var(--pen)}
+.cmpcol .cr.colder{color:var(--sky)}
+.cmpadd{flex:none;width:74px;min-height:96px;border:1px dashed var(--rule);border-radius:12px;background:none;color:var(--ink-soft);font-size:12px;cursor:pointer;display:grid;place-items:center;line-height:1.5}
+.cmpadd:active{background:#E3ECF4}
+.cmpempty{padding:16px 14px;font-size:12.5px;color:var(--ink-soft);text-align:center;line-height:2}
+.cmpempty .cmpadd{display:inline-grid;width:auto;min-height:0;padding:8px 16px;margin-top:4px}
+
 /* ---------- 搜索全屏层 ---------- */
 .overlay{
   position:fixed;inset:0;z-index:60;background:var(--paper);
@@ -269,6 +293,10 @@ footer a{color:var(--ink-2)}
 
 <main>
   <section class="card" id="nowCard" aria-label="当前天气"></section>
+  <section class="card" aria-label="今日穿搭">
+    <div class="card-h"><h2>今日穿搭</h2><span class="note" id="outfitNote">—</span></div>
+    <div class="outfit" id="outfit"></div>
+  </section>
   <section class="card" aria-label="24 小时气温曲线">
     <div class="card-h"><h2>24 小时自记曲线</h2><span class="note" id="chartNote">—</span></div>
     <div id="chartBox"></div>
@@ -280,6 +308,10 @@ footer a{color:var(--ink-2)}
   <section class="card" aria-label="七日预报">
     <div class="card-h"><h2>七日预报</h2><span class="note">统一刻度</span></div>
     <div class="days" id="days"></div>
+  </section>
+  <section class="card" aria-label="城市对比">
+    <div class="card-h"><h2>城市对比</h2><span class="note" id="cmpNote">最多 4 城 · 与当前城对比</span></div>
+    <div class="cmpwrap" id="cmpwrap"></div>
   </section>
   <footer>
     数据 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> · 每 15 分钟自动刷新<br>
@@ -333,13 +365,14 @@ var nowCard=$("#nowCard"),chartBox=$("#chartBox"),gauges=$("#gauges"),days=$("#d
 var overlay=$("#overlay"),qEl=$("#q"),resEl=$("#res"),resLabel=$("#resLabel"),chipsEl=$("#chips");
 var pull=$("#pull"),pullText=$("#pullText"),offTag=$("#offTag");
 var refreshBtn=$("#refreshBtn"),geoBtn=$("#geoBtn");
-var state={place:null,data:null,timer:null};
+var state={place:null,data:null,timer:null,cmp:[],cmpData:{}};
+try{state.cmp=JSON.parse(localStorage.getItem("wx.cmp.v1")||"[]")||[];}catch(e){state.cmp=[];}
 var reduced=window.matchMedia&&window.matchMedia("(prefers-reduced-motion:reduce)").matches;
 
 CHIPS.forEach(function(c){
   var b=document.createElement("button");
   b.type="button";b.className="chip";b.textContent=c.name;b.setAttribute("aria-pressed","false");
-  b.addEventListener("click",function(){load(c,true);closeOverlay();});
+  b.addEventListener("click",function(){if(ovMode==="cmp"){addCmp(c);closeOverlay();}else{load(c,true);closeOverlay();}});
   chipsEl.appendChild(b);
 });
 function syncChips(n){Array.prototype.forEach.call(chipsEl.children,function(b,i){b.setAttribute("aria-pressed",String(CHIPS[i].name===n));});}
@@ -368,6 +401,7 @@ function load(place,save){
       if(!d.current||!d.hourly||!d.daily)throw new Error("数据字段缺失");
       state.data=d;refreshBtn.classList.remove("spin");
       render();
+      loadCmp();
       clearTimeout(state.timer);
       state.timer=setTimeout(function(){load(place,false);},15*60*1000);
     })
@@ -409,6 +443,7 @@ function render(){
 
   $("#chartNote").textContent="过去6h 实测 · 未来18h 预报";
   drawChart(d,ni);
+  renderOutfit(d,ti);
 
   var rows=[
     ["体感温度",fmt1(c.apparent_temperature),"°C","实测 "+fmt1(c.temperature_2m)+"°"],
@@ -452,6 +487,105 @@ function render(){
   reveal();
 }
 function uvLabel(v){if(v==null)return "—";if(v<3)return "弱";if(v<6)return "中等·防晒";if(v<8)return "强·防晒";if(v<11)return "很强";return "极强";}
+
+/* 今日穿搭：按最高/最低温、昼夜温差、降水、风、紫外线给建议 */
+function outfit(d,ti){
+  var dd=d.daily,hi=dd.temperature_2m_max[ti],lo=dd.temperature_2m_min[ti];
+  var pop=dd.precipitation_probability_max[ti],wind=dd.wind_speed_10m_max[ti],uv=dd.uv_index_max[ti];
+  var code=dd.weather_code[ti],w=wmo(code);
+  var wet=(code>=51&&code<=67)||(code>=80&&code<=82)||(code>=95&&code<=99);
+  var snowy=(code>=66&&code<=67)||(code>=71&&code<=77)||(code>=85&&code<=86);
+  var rainy=(pop!=null&&pop>=50)||wet;
+  var top,bot,shoe,gear=[],notes=[];
+  if(hi<=-5){top="厚羽绒服 + 厚毛衣 + 保暖内衣";bot="羽绒裤 / 加绒厚裤";shoe="雪地靴 / 加绒靴";gear.push("围巾 + 手套 + 帽子");}
+  else if(hi<=5){top="羽绒服 / 厚大衣 + 毛衣";bot="厚裤，可加保暖裤";shoe="靴子 / 皮鞋";gear.push("围巾 + 手套");}
+  else if(hi<=10){top="大衣 / 厚夹克 + 针织衫";bot="长裤";shoe="皮鞋 / 运动鞋";gear.push("备一条围巾");}
+  else if(hi<=16){top="夹克 / 风衣 + 长袖";bot="长裤";shoe="运动鞋";}
+  else if(hi<=22){top="长袖 / 衬衫 + 薄外套";bot="长裤 / 长裙";shoe="运动鞋 / 单鞋";}
+  else if(hi<=27){top="短袖或薄长袖";bot="薄长裤 / 裙装";shoe="运动鞋 / 凉鞋";}
+  else{top="短袖、透气面料";bot="短裤 / 裙装";shoe="凉鞋 / 透气鞋";gear.push("防暑补水");}
+  if(hi-lo>=10)notes.push("昼夜温差 "+Math.round(hi-lo)+"°，加一件易穿脱的外套");
+  if(lo<=4&&hi>=14)notes.push("早晚偏凉，洋葱式叠穿");
+  if(rainy)gear.push(snowy?"带伞 + 防滑鞋":"带伞，鞋选防水");
+  if(wind!=null&&wind>=30)gear.push("风 "+Math.round(wind)+" km/h，外套选防风");
+  if(uv!=null&&uv>=6)gear.push("紫外线 "+uv.toFixed(0)+"（"+(uv>=8?"强":"中等")+"），防晒衣 / 防晒霜");
+  if(!gear.length)gear.push("无特殊装备，轻松出门");
+  var sum="今日"+w[0]+"，"+Math.round(lo)+"~"+Math.round(hi)+"°C。"+top+"。"+(notes.length?notes.join("；")+"。":"");
+  return {sum:sum,rows:[["上装",top],["下装",bot],["鞋",shoe],["出门装备",gear.join("；")]]};
+}
+function renderOutfit(d,ti){
+  var o=outfit(d,ti);
+  var wd=["周日","周一","周二","周三","周四","周五","周六"];
+  var dt=new Date(d.daily.time[ti]+"T12:00:00");
+  $("#outfitNote").textContent=d.daily.time[ti].slice(5).replace("-","/")+" "+wd[dt.getDay()];
+  $("#outfit").innerHTML='<p class="sum reveal">'+esc(o.sum)+'</p>'
+    +o.rows.map(function(r){return '<div class="row reveal"><span class="k">'+esc(r[0])+'</span><span class="v">'+esc(r[1])+'</span></div>';}).join("");
+}
+
+/* 城市对比 */
+function cmpKey(p){return p.latitude.toFixed(2)+","+p.longitude.toFixed(2);}
+function saveCmp(){try{localStorage.setItem("wx.cmp.v1",JSON.stringify(state.cmp));}catch(e){}}
+function buildCmpURL(p){
+  return "https://api.open-meteo.com/v1/forecast"
+   +"?latitude="+encodeURIComponent(p.latitude)+"&longitude="+encodeURIComponent(p.longitude)
+   +"&current=temperature_2m,apparent_temperature,weather_code"
+   +"&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+   +"&timezone=auto&forecast_days=1";
+}
+function loadCmp(){
+  renderCmp();
+  var items=state.cmp||[];
+  if(!items.length)return;
+  Promise.all(items.map(function(p){
+    return fetch(buildCmpURL(p),{headers:{Accept:"application/json"}})
+      .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
+      .then(function(j){var o={};o[cmpKey(p)]=j;return o;})
+      .catch(function(){var o={};o[cmpKey(p)]=null;return o;});
+  })).then(function(rs){
+    var m={};
+    rs.forEach(function(o){Object.keys(o).forEach(function(k){m[k]=o[k];});});
+    state.cmpData=m;renderCmp();
+  });
+}
+function addCmp(p){
+  if(!p)return;
+  state.cmp=state.cmp||[];
+  if(state.cmp.length>=4){alert("最多对比 4 个城市");return;}
+  var dup=state.cmp.some(function(x){return x.name===p.name&&Math.abs(x.latitude-p.latitude)<0.01;});
+  if(dup){renderCmp();return;}
+  state.cmp.push(p);saveCmp();loadCmp();
+}
+function rmCmp(i){state.cmp.splice(i,1);saveCmp();loadCmp();}
+function renderCmp(){
+  var wrap=$("#cmpwrap"),items=state.cmp||[];
+  if(!items.length){
+    wrap.innerHTML='<div class="cmpempty">把别的城市加进来，和「'+esc(state.place?state.place.name:"当前城市")+'」并排比温度、天气和降水概率。<br><button class="cmpadd" id="cmpAdd" type="button">＋ 添加城市</button></div>';
+  }else{
+    var base=(state.data&&state.data.current)?state.data.current.temperature_2m:null;
+    var h='<div class="cmpgrid">';
+    items.forEach(function(p,i){
+      var cd=state.cmpData?state.cmpData[cmpKey(p)]:null;
+      h+='<div class="cmpcol"><button class="cx" type="button" data-i="'+i+'" aria-label="移除'+esc(p.name)+'">×</button><p class="cn">'+esc(p.name)+'</p>';
+      if(!cd){h+='<div class="cd">载入中…</div></div>';return;}
+      var c=cd.current,w=wmo(c.weather_code);
+      var diff=(base!=null&&c.temperature_2m!=null)?Math.round((c.temperature_2m-base)*10)/10:null;
+      var dtxt=(diff==null)?"":(diff>0?"比此地 +"+diff+"°":(diff<0?"比此地 "+diff+"°":"与此地持平"));
+      h+='<div class="ci">'+icon(w[1],20)+'</div>'
+        +'<div class="ct">'+fmt1(c.temperature_2m)+'°</div>'
+        +'<div class="cd">'+fmt1(cd.daily.temperature_2m_min[0])+'~'+fmt1(cd.daily.temperature_2m_max[0])+'°</div>'
+        +'<div class="cd">降水 '+(cd.daily.precipitation_probability_max[0]==null?"—":Math.round(cd.daily.precipitation_probability_max[0])+"%")+'</div>'
+        +'<div class="cr '+(diff>0?"warmer":(diff<0?"colder":""))+'">'+dtxt+'</div></div>';
+    });
+    h+='</div>';
+    if(items.length<4)h+='<div style="display:flex;margin-top:8px"><button class="cmpadd" id="cmpAdd" type="button" style="width:100%;min-height:0;padding:9px">＋ 添加对比城市</button></div>';
+    wrap.innerHTML=h;
+  }
+  var add=wrap.querySelector("#cmpAdd");
+  if(add)add.addEventListener("click",function(){openOverlay("cmp");});
+  Array.prototype.forEach.call(wrap.querySelectorAll(".cx"),function(b){
+    b.addEventListener("click",function(){rmCmp(+b.dataset.i);});
+  });
+}
 function reveal(){
   var els=document.querySelectorAll(".reveal");
   if(reduced){Array.prototype.forEach.call(els,function(e){e.classList.add("in");});return;}
@@ -515,9 +649,10 @@ function drawChart(d,ni){
 }
 
 /* 搜索层 */
-function openOverlay(){overlay.classList.add("open");setTimeout(function(){qEl.focus();},120);}
+var ovMode="main";
+function openOverlay(mode){ovMode=mode||"main";qEl.placeholder=ovMode==="cmp"?"搜索要对比的城市：深圳 / Paris":"搜索城市：杭州 / Tokyo";overlay.classList.add("open");setTimeout(function(){qEl.focus();},120);}
 function closeOverlay(){overlay.classList.remove("open");qEl.blur();closeRes();}
-$("#cityBtn").addEventListener("click",openOverlay);
+$("#cityBtn").addEventListener("click",function(){openOverlay("main");});
 $("#closeOv").addEventListener("click",closeOverlay);
 var deb=null,cand=[],cur=-1;
 qEl.addEventListener("input",function(){clearTimeout(deb);var v=qEl.value.trim();if(!v){closeRes();return;}deb=setTimeout(function(){search(v);},280);});
@@ -531,7 +666,7 @@ function search(v){
        return '<li><button type="button" data-i="'+i+'"><span class="rname">'+esc(c.name)+'</span><span class="rmeta">'+esc([c.admin1,c.country].filter(Boolean).join(" · "))+'</span></button></li>';
      }).join("");
      Array.prototype.forEach.call(resEl.querySelectorAll("button"),function(b){
-       b.addEventListener("click",function(){load(cand[+b.dataset.i],true);closeOverlay();});
+       b.addEventListener("click",function(){if(ovMode==="cmp"){addCmp(cand[+b.dataset.i]);closeOverlay();}else{load(cand[+b.dataset.i],true);closeOverlay();}});
      });
      resLabel.hidden=false;
    })
